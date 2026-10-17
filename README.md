@@ -70,7 +70,7 @@ Other contracts can use a feed as a threshold input, for example in escrows, con
 
 ## Test results
 
-Add your results here, for example:
+for example:
 
 - Normal case: value extracted and stored, round increments.
 - Missing number: round fails.
