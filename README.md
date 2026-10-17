@@ -2,8 +2,8 @@
 
 A reusable GenLayer Intelligent Contract primitive for reading a numeric fact from a web page, with consensus based on numeric tolerance and evidence verification.
 
-- Deployed contract (Studio): `<PASTE_CONTRACT_ADDRESS>`
-- Explorer: `<PASTE_EXPLORER_LINK>`
+- Deployed contract (Studio): `0xa9478Bf7Fb0C06591b246Ae124b60eF8351e20dc`
+- Explorer: `https://explorer-studio.genlayer.com/tx/0x5265ad6231eccfe17f0138d8ee9e0913ac9eaa4a96e31cdcea7cd01af31432e7`
 
 ## Problem
 
@@ -70,7 +70,7 @@ Other contracts can use a feed as a threshold input, for example in escrows, con
 
 ## Test results
 
-Add your own results here, for example:
+Add your results here, for example:
 
 - Normal case: value extracted and stored, round increments.
 - Missing number: round fails.
