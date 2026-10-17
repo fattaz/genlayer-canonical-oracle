@@ -24,55 +24,112 @@ Values are non-negative fixed-point integers with 6 decimals (`1.5` is stored as
 
 | Method | Type | Description |
 |---|---|---|
-| `create_feed(feed_id, url, question, unit, tolerance_bps, min_value, max_value)` | write | Registers a feed. Bounds are scaled by 1e6. `tolerance_bps` is 1 to 5000. |
+| `create_feed(feed_id, url, question, unit, tolerance_bps, min_value, max_value)` | write | Registers a feed. `url` must start with `https://`. `tolerance_bps` is 1 to 5000. `min_value` and `max_value` are scaled by 1,000,000. |
 | `update(feed_id)` | write | Runs a consensus round and stores the new value and evidence. Callable by anyone. |
 | `get_latest(feed_id)` | view | Returns round, value, unit, evidence quote, source, and tolerance. |
 | `get_config(feed_id)` | view | Returns the feed configuration. |
 
-## Failure modes handled
+### Scaling reference
 
-| Case | Result |
+| Real value | Pass this number |
 |---|---|
-| Page does not contain an answer | Round fails |
-| Quote not found in page | Round fails |
-| Value is not a plain non-negative number | Round fails |
-| Validators disagree beyond tolerance | No consensus |
-| Value outside sanity bounds | Update rejected |
-| Leader errors and validators succeed | Validators disapprove |
+| 1 | `1000000` |
+| 1,000 | `1000000000` |
+| 10,000 | `10000000000` |
 
-## Example
+Tolerance is in basis points: `100` = 1%, `50` = 0.5%, `500` = 5%.
 
+## Deploy
+
+1. Open [GenLayer Studio](https://studio.genlayer.com) and paste `contracts/tolerance_oracle.py`.
+2. Deploy with no constructor arguments.
+
+## Testing guide
+
+Run these in order in Studio's "Run and Debug" tab. A transaction can show `ACCEPTED` as its consensus status while its result is `ERROR`. Always check the **Result** field, not only the status.
+
+### Test 1: create a feed (success)
+
+Method: `create_feed`
+
+| Argument | Value |
+|---|---|
+| `feed_id` | `everest_height` |
+| `url` | `https://en.wikipedia.org/wiki/Mount_Everest` |
+| `question` | `What is the elevation of Mount Everest above sea level in metres?` |
+| `unit` | `metres` |
+| `tolerance_bps` | `100` |
+| `min_value` | `1000000000` |
+| `max_value` | `10000000000` |
+
+Expected: status `ACCEPTED`, result not `ERROR`, output `None`.
+
+### Test 2: run a consensus round (success)
+
+Method: `update`
+
+| Argument | Value |
+|---|---|
+| `feed_id` | `everest_height` |
+
+Expected: status `ACCEPTED`, result not `ERROR`. This takes longer than other calls because each validator fetches the page and runs the LLM.
+
+### Test 3: read the result
+
+Method: `get_latest` with `feed_id` = `everest_height`
+
+Expected output (the evidence wording can differ slightly between runs, but it always contains `8,848.86`):
+
+```json
+{
+  "round": 1,
+  "value_scaled": 8848860000,
+  "value": "8848.860000",
+  "unit": "metres",
+  "evidence": "... 8,848.86 m (29,031.7 ft) ...",
+  "source": "https://en.wikipedia.org/wiki/Mount_Everest",
+  "tolerance_bps": 100
+}
 ```
-create_feed(
-  "example_feed",
-  "https://example.com/page-with-the-number",
-  "Current value of X in percent",
-  "percent",
-  100,
-  1000000,
-  100000000
-)
-update("example_feed")
-get_latest("example_feed")
-```
 
-This creates a feed with 1% tolerance (100 bps) and bounds of 1.0 to 100.0.
+### Test 4: read the config
+
+Method: `get_config` with `feed_id` = `everest_height`
+
+Expected: `owner` is the address that called `create_feed`, and `url`, `question`, `unit`, `tolerance_bps` (`100`), `min_value` (`1000000000`), and `max_value` (`10000000000`) match what you entered.
+
+### Failure cases
+
+Each of these should end with result `ERROR` and no stored value.
+
+| # | Method and arguments | Expected error |
+|---|---|---|
+| 5 | `create_feed` with an empty `url`, or one starting with `http://` | `url must be https` |
+| 6 | `create_feed` with `feed_id` = `everest_height` again | `feed already exists` |
+| 7 | `create_feed` with `tolerance_bps` = `0` or `6000` | `tolerance_bps must be in 1..5000` |
+| 8 | `create_feed` with `min_value` = `5000`, `max_value` = `1000` | `invalid bounds` |
+| 9 | `update` with `feed_id` = `does_not_exist` | `unknown feed` |
+
+### Sanity bounds case
+
+1. `create_feed` with `feed_id` = `everest_bad_bounds`, the same `url`, `question`, and `unit` as Test 1, `tolerance_bps` = `100`, `min_value` = `1000000`, `max_value` = `10000000` (that is 1.0 to 10.0).
+2. `update` with `feed_id` = `everest_bad_bounds`.
+
+Expected: the update does not succeed, because 8848.86 is outside the allowed range. `get_latest` still shows `round` = `0` and `value_scaled` = `0`.
+
+### Page without an answer
+
+1. `create_feed` with `feed_id` = `no_answer`, `url` = `https://example.com`, `question` = `What is the price of Bitcoin in USD?`, `unit` = `USD`, `tolerance_bps` = `100`, `min_value` = `1000000`, `max_value` = `1000000000000`.
+2. `update` with `feed_id` = `no_answer`.
+
+Expected: the round fails, with `page did not contain an answer` or `evidence quote not found in page`, depending on what the model returns. `round` stays `0`.
+
+## Notes for testers
+
+- Use a page that states the number as plain text. Pages that load values with JavaScript or hide them behind logins will not work.
+- Keep `tolerance_bps` realistic for the source. Fast-changing values such as prices need a higher tolerance (for example `100` to `500`) because validators fetch at slightly different moments.
+- Bounds are a safety net, not a filter. Set them wide enough to cover legitimate changes.
 
 ## Use as a building block
 
 Other contracts can use a feed as a threshold input, for example in escrows, conditional payouts, or markets that settle on a published number.
-
-## Deploy
-
-1. Open GenLayer Studio and paste `contracts/tolerance_oracle.py`.
-2. Deploy with no constructor arguments.
-3. Call `create_feed`, then `update`, then `get_latest`.
-
-## Test results
-
-for example:
-
-- Normal case: value extracted and stored, round increments.
-- Missing number: round fails.
-- Value outside bounds: rejected.
-- Tight tolerance: consensus fails when validators differ.
